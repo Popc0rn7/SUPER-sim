@@ -23,12 +23,45 @@
 
 #include <super_core/super_planner.h>
 #include <memory>
+#include <cmath>
 #include <super_utils/scope_timer.hpp>
 #include <fmt/color.h>
 
 using namespace super_utils;
 
 namespace super_planner {
+    namespace {
+        // CorridorGenerator expects consecutive guide points to be shorter than its
+        // seed-line limit.  A* can return sparse points in an unobstructed corridor
+        // (including a direct jump from the local horizon to the global goal), so
+        // densify both position and time consistently before corridor construction.
+        void subdivideGuidePath(vec_Vec3f &path, vector<double> &stamps, const double max_segment_length) {
+            if (path.size() < 2 || path.size() != stamps.size()) {
+                return;
+            }
+
+            vec_Vec3f subdivided_path;
+            vector<double> subdivided_stamps;
+            subdivided_path.reserve(path.size());
+            subdivided_stamps.reserve(stamps.size());
+            subdivided_path.emplace_back(path.front());
+            subdivided_stamps.emplace_back(stamps.front());
+
+            for (size_t i = 1; i < path.size(); ++i) {
+                const Vec3f delta = path[i] - path[i - 1];
+                const int segment_num = std::max(1, static_cast<int>(std::ceil(delta.norm() / max_segment_length)));
+                for (int segment_id = 1; segment_id <= segment_num; ++segment_id) {
+                    const double ratio = static_cast<double>(segment_id) / segment_num;
+                    subdivided_path.emplace_back(path[i - 1] + ratio * delta);
+                    subdivided_stamps.emplace_back(stamps[i - 1] + ratio * (stamps[i] - stamps[i - 1]));
+                }
+            }
+            path.swap(subdivided_path);
+            stamps.swap(subdivided_stamps);
+        }
+    }
+
+
     SuperPlanner::SuperPlanner
             (const std::string &cfg_path,
              const ros_interface::RosInterface::Ptr &ros_ptr,
@@ -347,13 +380,13 @@ namespace super_planner {
         yaw = cmd_traj_info_.getYaw((eval_t))[0];
         yaw_dot = cmd_traj_info_.getYawRate((eval_t))[0];
 
-        if (isnan(yaw)) {
+        if (std::isnan(yaw)) {
             yaw = last_yaw;
             yaw_dot = 0;
         } else {
             last_yaw = yaw;
         }
-        if (isnan(yaw_dot)) {
+        if (std::isnan(yaw_dot)) {
             yaw_dot = 0;
         }
 
@@ -700,6 +733,8 @@ namespace super_planner {
         const bool connected_goal = (guide_path.back().head(2) - gi_.goal_p.head(2)).norm() < cfg_.resolution * 2;
         out_exp_traj_info.setGoalConnectedFlag(connected_goal);
 
+        subdivideGuidePath(guide_path, guide_stamp, cfg_.corridor_line_max_length * 0.9);
+
         sfc.clear();
         {
             TimeConsuming t_viz("tviz", false);
@@ -791,7 +826,7 @@ namespace super_planner {
 
 
         bool free_end{true};
-        if (cfg_.goal_yaw_en && !isnan(gi_.goal_yaw) && connected_goal) {
+        if (cfg_.goal_yaw_en && !std::isnan(gi_.goal_yaw) && connected_goal) {
             free_end = false;
             fina_yaw[0] = gi_.goal_yaw;
         }
@@ -1044,7 +1079,7 @@ namespace super_planner {
             Vec4f yaw_goal{0, 0, 0, 0};
             bool free_end{true};
             if (cfg_.goal_yaw_en) {
-                if (!isnan(gi_.goal_yaw)) {
+                if (!std::isnan(gi_.goal_yaw)) {
                     free_end = false;
                     yaw_goal[0] = gi_.goal_yaw;
                 }

@@ -1,3 +1,4 @@
+#include <rog_map/stage3_height.h>
 /**
 * This file is part of ROG-Map
 *
@@ -89,6 +90,8 @@ bool ROGMap::findNearestCellThat(const bool & is, const GridType& target_type,
         const Vec3i q_id =start_id + nei_id;
         Vec3f q_pos;
         globalIndexToPos(q_id, q_pos);
+        q_pos.z()=stage3_height::cell_height(q_pos.z(),cfg_.resolution);
+        if (!stage3_height::allowed(q_pos.z())) continue;
         if((q_pos - start_pos).norm() > max_dis) {
             return false;
         }
@@ -114,6 +117,8 @@ bool ROGMap::findNearestInfCellThat(const bool & is, const GridType& target_type
         const Vec3i q_id = start_id + nei_id;
         Vec3f q_pos;
         globalIndexToPos(q_id, q_pos);
+        q_pos.z()=stage3_height::cell_height(q_pos.z(),cfg_.resolution);
+        if (!stage3_height::allowed(q_pos.z())) continue;
         if((q_pos - start_pos).norm() > max_dis) {
             return false;
         }

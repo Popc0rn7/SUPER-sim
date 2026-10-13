@@ -1,3 +1,4 @@
+#include <super_core/stage3_height.h>
 /**
 * This file is part of SUPER
 *
@@ -172,6 +173,7 @@ namespace path_search {
         } else {
             throw std::runtime_error(" -- [A*] Map type not defined.");
         }
+        pos.z()=stage3_height::cell_height(pos.z(),md_.resolution);
     }
 
     bool Astar::insideLocalMap(const rog_map::Vec3f &pos) const {
@@ -426,6 +428,7 @@ namespace path_search {
                         neighborIdx(1) = (current->id_g)(1) + dy;
                         neighborIdx(2) = (current->id_g)(2) + dz;
                         globalIndexToPos(neighborIdx, neighborPos);
+                        if (!stage3_height::allowed(neighborPos.z())) continue;
 
                         if (!insideLocalMap(neighborIdx)) {
                             continue;
@@ -645,6 +648,7 @@ namespace path_search {
                         neighborIdx(1) = (current->id_g)(1) + dy;
                         neighborIdx(2) = (current->id_g)(2) + dz;
                         globalIndexToPos(neighborIdx, neighborPos);
+                        if (!stage3_height::allowed(neighborPos.z())) continue;
                         if (!map_ptr_->insideLocalMap(neighborPos) ||
                             !insideLocalMap(neighborIdx)) {
                             continue;

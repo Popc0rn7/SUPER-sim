@@ -29,6 +29,7 @@
 
 
 #include "fsm/fsm.h"
+#include "fsm/terminal_hold.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 #include <ros_interface/ros2/ros2_interface.hpp>
@@ -54,6 +55,7 @@ namespace fsm {
         mars_quadrotor_msgs::msg::PositionCommand pid_cmd_;
         rog_map::ROGMapROS::Ptr map_ptr_;
         mars_quadrotor_msgs::msg::PositionCommand latest_cmd;
+        bool terminal_goal_hold_{false};
         nav_msgs::msg::Path path;
 
         vector<mars_quadrotor_msgs::msg::PositionCommand> cmd_logs_;
@@ -368,6 +370,16 @@ namespace fsm {
             if (stop) {
                 return;
             }
+            // Keep the final stationary target alive while the controller
+            // settles and the mission client verifies arrival. A new goal or
+            // any other FSM state ends this hold; never replay an old target
+            // while GENERATE_TRAJ is planning the next leg.
+            if (machine_state_ == WAIT_GOAL && terminal_goal_hold_ && !gi_.new_goal) {
+                ros_ptr_->getSimTime(pid_cmd_.header.stamp.sec, pid_cmd_.header.stamp.nanosec);
+                cmd_pub_->publish(pid_cmd_);
+                return;
+            }
+            terminal_goal_hold_ = false;
             if (machine_state_ != FOLLOW_TRAJ && machine_state_ != EMER_STOP) {
                 return;
             }
@@ -380,6 +392,21 @@ namespace fsm {
             cmd_pub_->publish(pid_cmd_);
             if (traj_finish_) {
                 cout << GREEN << " -- [Fsm] Traj finish." << RESET << endl;
+                const Vec3f endpoint(pid_cmd_.position.x, pid_cmd_.position.y, pid_cmd_.position.z);
+                const Vec3f velocity(pid_cmd_.velocity.x, pid_cmd_.velocity.y, pid_cmd_.velocity.z);
+                const Vec3f acceleration(pid_cmd_.acceleration.x, pid_cmd_.acceleration.y, pid_cmd_.acceleration.z);
+                if (terminalGoalHoldEligible(traj_finish_, pid_cmd_.trajectory_flag == 1,
+                                             (endpoint - gi_.goal_p).norm(), velocity.norm(),
+                                             acceleration.norm()) && !gi_.new_goal) {
+                    pid_cmd_.velocity = geometry_msgs::msg::Vector3();
+                    pid_cmd_.acceleration = geometry_msgs::msg::Vector3();
+                    pid_cmd_.jerk = geometry_msgs::msg::Vector3();
+                    pid_cmd_.yaw_dot = 0.0;
+                    terminal_goal_hold_ = true;
+                    finish_plan = true;
+                    ChangeState("PubCmdCallback: terminal goal hold", WAIT_GOAL);
+                    return;
+                }
                 if (closeToGoal(0.1)) {
                     ChangeState("PubCmdCallback", WAIT_GOAL);
                 } else {

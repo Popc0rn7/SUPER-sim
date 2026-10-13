@@ -26,7 +26,7 @@
 #include <string>
 #include <utils/geometry/quadrotor_flatness.hpp>
 #include <utils/header/yaml_loader.hpp>
-#define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "log/"+(name)))
+#define DEBUG_FILE_DIR(name) (string(string("/tmp/stage3-super/")+(name)))
 
 namespace traj_opt {
     using std::string;

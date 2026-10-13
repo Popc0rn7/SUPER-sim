@@ -1,3 +1,4 @@
+#include <super_core/stage3_height.h>
 /**
 * This file is part of SUPER
 *
@@ -213,6 +214,8 @@ namespace super_planner {
         map_ptr_->boxSearch(box_min, box_max, OCCUPIED, pc);
         box_min.z() += robot_r_;
         box_max.z() -= robot_r_;
+        stage3_height::clip(box_min, box_max);
+        if (box_min.z() >= box_max.z()) return false;
         MatD4f planes;
         Eigen::Vector3d a = pt, b = pt;
         Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();
@@ -273,6 +276,8 @@ namespace super_planner {
         box_max = pt;
         box_min -= Vec3f(dis, dis, dis);
         box_max += Vec3f(dis, dis, dis);
+        stage3_height::clip(box_min, box_max);
+        if (box_min.z() >= box_max.z()) return false;
         MatD4f planes;
         Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();
         bd(0, 0) = 1.0;
@@ -309,6 +314,8 @@ namespace super_planner {
         map_ptr_->boxSearch(box_min, box_max, OCCUPIED, pc);
         box_min.z() += robot_r_;
         box_max.z() -= robot_r_;
+        stage3_height::clip(box_min, box_max);
+        if (box_min.z() >= box_max.z()) return false;
         MatD4f planes;
         Eigen::Vector3d a = line.first, b = line.second;
         Eigen::Matrix<double, 6, 4> bd = Eigen::Matrix<double, 6, 4>::Zero();

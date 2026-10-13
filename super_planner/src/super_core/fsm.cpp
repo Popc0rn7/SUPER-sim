@@ -1,3 +1,4 @@
+#include <super_core/stage3_height.h>
 /**
 * This file is part of SUPER
 *
@@ -60,7 +61,11 @@ namespace fsm {
             return;
         }
 
-        planner_ptr_->getMap()->getNearestInfCellNot(GridType::OCCUPIED, gi_.goal_p, gi_.goal_p, 3.0);
+        if (!std::isfinite(stage3_height::low()) || planner_ptr_->getMap()->getInfGridType(gi_.goal_p)==GridType::OCCUPIED) {
+            Vec3f shifted;
+            if (!planner_ptr_->getMap()->getNearestInfCellNot(GridType::OCCUPIED, gi_.goal_p, shifted, 3.0) || !stage3_height::allowed(shifted.z())) return;
+            gi_.goal_p=shifted;
+        }
 
         TimeConsuming replan_once_time("replan_once_time", false);
 
@@ -130,6 +135,10 @@ namespace fsm {
                 break;
             }
             case GENERATE_TRAJ: {
+                const double now = ros_ptr_->getSimTime();
+                if (now < next_plan_from_rest_attempt_) {
+                    return;
+                }
                 if (closeToGoal(0.1)) {
                     ChangeState("MainFsmCallback", WAIT_GOAL);
                     gi_.new_goal = false;
@@ -143,6 +152,7 @@ namespace fsm {
                     return;
                 }
                 if (retcode == SUCCESS || retcode == FINISH) {
+                    next_plan_from_rest_attempt_ = now;
                     gi_.new_goal = false;
                     plan_from_rest_ = true;
                     finish_plan = false;
@@ -154,8 +164,9 @@ namespace fsm {
 
                     ChangeState("MainFsmCallback", FOLLOW_TRAJ);
                 } else {
-                    cout << YELLOW << " -- [Fsm] PlanFromRest failed, try replan." << RESET << endl;
-                    // ros::Duration(0.1).sleep();
+                    next_plan_from_rest_attempt_ = now + cfg_.initial_plan_retry_interval;
+                    cout << YELLOW << " -- [Fsm] PlanFromRest failed; keep mapping and retry in "
+                         << cfg_.initial_plan_retry_interval << " s." << RESET << endl;
                 }
                 replan_logs_.push_back(planner_ptr_->getLatestReplanLog());
                 break;
@@ -188,7 +199,10 @@ namespace fsm {
             click_point.z() = cfg_.click_height;
         }
 
-        if (planner_ptr_->getMap()->getNearestInfCellNot(GridType::OCCUPIED, click_point, gi_.goal_p, 3.0)) {
+        const bool preserve = std::isfinite(stage3_height::low()) && planner_ptr_->getMap()->getInfGridType(click_point)!=GridType::OCCUPIED;
+        if (preserve) gi_.goal_p=click_point;
+        if (preserve || planner_ptr_->getMap()->getNearestInfCellNot(GridType::OCCUPIED, click_point, gi_.goal_p, 3.0)) {
+            if (!stage3_height::allowed(gi_.goal_p.z())) return;
             cout << GREEN << " -- [Fsm] Get goal at " << RESET << gi_.goal_p.transpose() << endl;
         } else {
             fmt::print(fg(fmt::color::indian_red), "Goal is deeply occupied, skip this goal.\n");
@@ -202,7 +216,7 @@ namespace fsm {
         }
 
         if (cfg_.click_yaw_en) {
-            if (isnan(q.w()) || isnan(q.x()) || isnan(q.y()) || isnan(q.z())) {
+            if (std::isnan(q.w()) || std::isnan(q.x()) || std::isnan(q.y()) || std::isnan(q.z())) {
                 gi_.goal_yaw = NAN;
                 ros_ptr_->info(" -- [Fsm] Receive click goal at: [{}, {}, {}]; goal yaw disabled",
                                gi_.goal_p.x(), gi_.goal_p.y(), gi_.goal_p.z());

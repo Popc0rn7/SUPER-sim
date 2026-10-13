@@ -54,29 +54,6 @@ int main(int argc, char** argv) {
     // 创建节点（替换ROS1的NodeHandle）
     auto node = std::make_shared<rclcpp::Node>("fsm_node");
 
-    // 检查是否使用仿真时间
-    while (rclcpp::ok()) {
-        bool use_sim_time;
-
-        // 获取参数
-        if (node->get_parameter("use_sim_time", use_sim_time)) {
-            if (!use_sim_time) {
-                // 如果 use_sim_time 为 false，打印信息并退出循环
-                std::cout << " -- [Bench] Use sim time is false, begin replay." << std::endl;
-                break;
-            } else {
-                // 如果 use_sim_time 为 true，设置为 false
-                node->set_parameter(rclcpp::Parameter("use_sim_time", false));
-            }
-        } else {
-            // 如果参数不存在，设置为 false
-            node->set_parameter(rclcpp::Parameter("use_sim_time", false));
-        }
-
-        // 休眠 1 秒
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-
     // 初始化FSM
 
 #define CONFIG_FILE_DIR(name) (std::string(std::string(ROOT_DIR) + "config/"+(name)))
@@ -84,7 +61,7 @@ int main(int argc, char** argv) {
     std::string cfg_path = "click.yaml";
     node->declare_parameter("config_name", cfg_path);
     node->get_parameter("config_name", cfg_path);
-    cfg_path = CONFIG_FILE_DIR(cfg_path);
+    if (cfg_path.empty() || cfg_path.front() != '/') cfg_path = CONFIG_FILE_DIR(cfg_path);
     fsm_ptr->init(node,cfg_path);
 
     // 打印启动信息（ROS2风格）

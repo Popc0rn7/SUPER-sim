@@ -40,7 +40,7 @@
 
 
 namespace super_planner {
-#define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "log/"+name))
+#define DEBUG_FILE_DIR(name) (string(string("/tmp/stage3-super/")+name))
     using namespace geometry_utils;
     using super_utils::Vec3i;
     using super_utils::vec_E;

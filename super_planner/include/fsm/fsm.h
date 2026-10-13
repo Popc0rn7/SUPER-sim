@@ -34,7 +34,7 @@
 
 
 #ifndef LOG_FILE_DIR
-#define LOG_FILE_DIR(name) (string(string(ROOT_DIR) + "log/"+name))
+#define LOG_FILE_DIR(name) (string(string("/tmp/stage3-super/")+name))
 #endif
 
 namespace fsm {
@@ -62,6 +62,7 @@ namespace fsm {
 
         // params
         bool started_{false}, plan_from_rest_{false};
+        double next_plan_from_rest_attempt_{0.0};
 
         struct GoalInfo {
             bool new_goal;

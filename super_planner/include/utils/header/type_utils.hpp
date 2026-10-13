@@ -32,7 +32,7 @@
 
 
 
-#define DEBUG_FILE_DIR(name) (std::string(std::string(ROOT_DIR) + "log/"+name))
+#define DEBUG_FILE_DIR(name) (std::string(std::string("/tmp/stage3-super/")+name))
 #define PCD_FILE_DIR(name) (std::string(std::string(ROOT_DIR) + "pcd/"+name))
 #define SIGN(x) ((x > 0) - (x < 0))
 
