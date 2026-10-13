@@ -30,6 +30,7 @@
 
 #include "fsm/fsm.h"
 #include "fsm/terminal_hold.hpp"
+#include <filesystem>
 
 #include <rclcpp/rclcpp.hpp>
 #include <ros_interface/ros2/ros2_interface.hpp>
@@ -221,6 +222,16 @@ namespace fsm {
                                          ? LOG_FILE_DIR(
                                                  "cmd_logs/" + BinaryFileHandler<int>::getCurrentTimeStr() + ".csv")
                                          : LOG_FILE_DIR("cmd_logs/" + name + ".csv");
+            for (const auto &file_path : {save_path, csv_path}) {
+                const auto directory = std::filesystem::path(file_path).parent_path();
+                std::error_code error;
+                std::filesystem::create_directories(directory, error);
+                if (error) {
+                    std::cerr << "Cannot create log directory " << directory << ": "
+                              << error.message() << std::endl;
+                    return;
+                }
+            }
             BinaryFileHandler<vector<LogOneReplan>>::save(save_path, replan_logs_);
 
             std::ofstream csv_writer;
