@@ -45,6 +45,7 @@ namespace fsm {
         bool click_goal_en{},visualization_en{};
         double replan_rate{}, resolution{}, initial_plan_retry_interval{1.0};
         double click_height{};
+        double stationary_replan_hold_timeout{0.0};
 
         bool click_yaw_en{};
         string cmd_topic, mpc_cmd_topic, click_goal_topic;
@@ -60,6 +61,7 @@ namespace fsm {
             loader.LoadParam("fsm/click_yaw_en", click_yaw_en, false);
             loader.LoadParam("fsm/replan_rate", replan_rate, 10.0);
             loader.LoadParam("fsm/initial_plan_retry_interval", initial_plan_retry_interval, 1.0);
+            loader.LoadParam("fsm/stationary_replan_hold_timeout", stationary_replan_hold_timeout, 0.0);
             loader.LoadParam("fsm/click_height", click_height, 1.5);
             loader.LoadParam("fsm/cmd_topic", cmd_topic, string("/planning/pos_cmd"));
             loader.LoadParam("fsm/mpc_cmd_topic", mpc_cmd_topic, string("/planning_cmd/mpc"));

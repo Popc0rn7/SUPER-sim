@@ -57,6 +57,8 @@ namespace fsm {
         rog_map::ROGMapROS::Ptr map_ptr_;
         mars_quadrotor_msgs::msg::PositionCommand latest_cmd;
         bool terminal_goal_hold_{false};
+        bool stationary_replan_hold_{false};
+        double stationary_hold_started_{0.0};
         nav_msgs::msg::Path path;
 
         vector<mars_quadrotor_msgs::msg::PositionCommand> cmd_logs_;
@@ -390,6 +392,19 @@ namespace fsm {
                 cmd_pub_->publish(pid_cmd_);
                 return;
             }
+            if (stationary_replan_hold_) {
+                const double elapsed = ros_ptr_->getSimTime() - stationary_hold_started_;
+                if (stopHoldActive(machine_state_ == GENERATE_TRAJ, elapsed,
+                                   cfg_.stationary_replan_hold_timeout)) {
+                    ros_ptr_->getSimTime(pid_cmd_.header.stamp.sec, pid_cmd_.header.stamp.nanosec);
+                    cmd_pub_->publish(pid_cmd_);
+                    return;
+                }
+                if (machine_state_ == GENERATE_TRAJ) {
+                    ros_ptr_->warn(" -- [Fsm] Stationary replan hold expired; stop commands for controller failsafe.");
+                }
+                stationary_replan_hold_ = false;
+            }
             terminal_goal_hold_ = false;
             if (machine_state_ != FOLLOW_TRAJ && machine_state_ != EMER_STOP) {
                 return;
@@ -421,6 +436,17 @@ namespace fsm {
                 if (closeToGoal(0.1)) {
                     ChangeState("PubCmdCallback", WAIT_GOAL);
                 } else {
+                    if (cfg_.stationary_replan_hold_timeout > 0.0 &&
+                        stationaryStopEligible(traj_finish_, velocity.norm(), acceleration.norm()) &&
+                        endpoint.allFinite()) {
+                        pid_cmd_.velocity = geometry_msgs::msg::Vector3();
+                        pid_cmd_.acceleration = geometry_msgs::msg::Vector3();
+                        pid_cmd_.jerk = geometry_msgs::msg::Vector3();
+                        pid_cmd_.yaw_dot = 0.0;
+                        stationary_hold_started_ = ros_ptr_->getSimTime();
+                        stationary_replan_hold_ = true;
+                        ros_ptr_->info(" -- [Fsm] Stationary trajectory ended; hold endpoint while replanning.");
+                    }
                     ChangeState("PubCmdCallback", GENERATE_TRAJ);
                 }
             }
