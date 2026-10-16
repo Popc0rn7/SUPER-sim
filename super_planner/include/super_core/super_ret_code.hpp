@@ -53,6 +53,7 @@ namespace super_planner {
         case SUPER_NO_START_POINT:
             return "Cannot find a start point in the local map";
         }
+        return "Unknown return code";
     };
 }
 #endif

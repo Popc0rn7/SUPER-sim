@@ -198,6 +198,7 @@ namespace super_planner {
     SuperPlanner::ReplanOnce(const Vec3f &goal_p,
                              const double &goal_yaw,
                              const bool &new_goal) {
+        const double replan_sim_start = ros_ptr_->getSimTime();
         TimeConsuming replan_total_t("ReplanOnce", false);
         std::lock_guard<std::mutex> guard(replan_lock_);
 
@@ -264,7 +265,14 @@ namespace super_planner {
         }
 
         double replan_dt = replan_total_t.stop();
-        if (replan_dt > cfg_.replan_forward_dt * 0.9) {
+        const double replan_sim_dt = ros_ptr_->getSimTime() - replan_sim_start;
+        // Optional slower-than-real-time simulation: retain trajectory lookahead,
+        // enforce simulation-time freshness AND a finite wall-clock compute cap.
+        const bool over_budget = cfg_.replan_wall_limit > 0
+            ? (replan_dt > cfg_.replan_wall_limit || replan_sim_dt < 0 ||
+               replan_sim_dt > cfg_.replan_forward_dt * 0.9)
+            : replan_dt > cfg_.replan_forward_dt * 0.9;
+        if (over_budget) {
             ros_ptr_->warn(" -- [SUPER] in [ReplanOnce]: Replan overtime, check parameters, replan dt = {}.", replan_dt);
             return FAILED;
         }

@@ -25,10 +25,13 @@
 #define SUPER_TYPE_UTILS_HPP
 
 // comment or uncomment the following line to enable or disable the utils
+#include <iostream>
 #include <super_utils/color_text.hpp>
 #include <super_utils/eigen_alias.hpp>
 #include <super_utils/color_msg_utils.hpp>
+#ifdef SUPER_ENABLE_STACKTRACE
 #include <utils/header/backward.hpp>
+#endif
 
 
 

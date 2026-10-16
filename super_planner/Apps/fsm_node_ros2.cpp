@@ -29,6 +29,7 @@
  * Test code:
  *      roslaunch simulator test_env.launch
  * */
+#ifdef SUPER_ENABLE_STACKTRACE
 #define BACKWARD_HAS_DW 1
 
 #include "utils/header/backward.hpp"
@@ -36,6 +37,7 @@
 namespace backward {
     backward::SignalHandling sh;
 }
+#endif
 
 
 using namespace fsm;
