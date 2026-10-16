@@ -9,3 +9,5 @@
 **.bin
 **.zip
 **.ply
+__pycache__/
+*.py[oc]

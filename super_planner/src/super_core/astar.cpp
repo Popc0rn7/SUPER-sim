@@ -247,6 +247,7 @@ namespace path_search {
         rog_map::Vec3f hit_pt;
         rog_map::Vec3f local_start_pt, local_end_pt;
         bool start_pt_out_local_map = false;
+        bool goal_clipped = false;
 
         local_start_pt = start_pt;
         local_end_pt = end_pt;
@@ -295,6 +296,7 @@ namespace path_search {
                     }
                     return INIT_ERROR;
                 }
+                goal_clipped = true;
             }
         }
 
@@ -388,7 +390,9 @@ namespace path_search {
                     node_path.push_back(temp_ptr);
                 }
                 ConvertNodePathToPointPath(node_path, out_path);
-                return REACH_GOAL;
+                // A clipped endpoint is local progress, not the requested goal.
+                // REACH_GOAL makes PathSearch append the original goal directly.
+                return goal_clipped ? REACH_HORIZON : REACH_GOAL;
             }
 
             // Distance terminate condition

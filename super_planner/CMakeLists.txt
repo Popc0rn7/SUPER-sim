@@ -133,4 +133,19 @@ install(DIRECTORY
 )
 
 
+
+# Opt-in integration regression; uses the real A* and an isolated ROS domain.
+option(SUPER_BUILD_PATH_SEARCH_TEST "Build clipped-goal A* regression" OFF)
+if(SUPER_BUILD_PATH_SEARCH_TEST)
+    add_executable(astar_clipped_goal_test test/astar_clipped_goal_test.cpp)
+    target_link_libraries(astar_clipped_goal_test PUBLIC super ${third_party_libs})
+    ament_target_dependencies(astar_clipped_goal_test PUBLIC ${ros_libs})
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(NAME astar_clipped_goal
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test/run_astar_clipped_goal.py
+            $<TARGET_FILE:astar_clipped_goal_test>)
+endif()
+
 ament_package()
