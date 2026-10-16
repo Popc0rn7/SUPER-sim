@@ -1,3 +1,4 @@
+#include "utils/header/stage3_profile.hpp"
 /**
 * This file is part of SUPER
 *
@@ -102,6 +103,7 @@ namespace super_planner {
     SuperPlanner::PlanFromRest(const Vec3f &goal_p,
                                const double &goal_yaw,
                                const bool &new_goal) {
+        stage3_profile::Scope profile_scope("PlanFromRest");
         std::lock_guard<std::mutex> guard(replan_lock_);
         latest_replan.reset();
         latest_replan.setGoal(goal_p, goal_yaw, robot_state_);
@@ -198,6 +200,7 @@ namespace super_planner {
     SuperPlanner::ReplanOnce(const Vec3f &goal_p,
                              const double &goal_yaw,
                              const bool &new_goal) {
+        stage3_profile::Scope profile_scope("ReplanOnce");
         const double replan_sim_start = ros_ptr_->getSimTime();
         TimeConsuming replan_total_t("ReplanOnce", false);
         std::lock_guard<std::mutex> guard(replan_lock_);
@@ -273,7 +276,12 @@ namespace super_planner {
                replan_sim_dt > cfg_.replan_forward_dt * 0.9)
             : replan_dt > cfg_.replan_forward_dt * 0.9;
         if (over_budget) {
-            ros_ptr_->warn(" -- [SUPER] in [ReplanOnce]: Replan overtime, check parameters, replan dt = {}.", replan_dt);
+            ros_ptr_->warn(" -- [SUPER] timing gate: wall={} s, sim={} s, optional wall cap={} s, forward={} s.",
+                           replan_dt, replan_sim_dt, cfg_.replan_wall_limit, cfg_.replan_forward_dt);
+            ros_ptr_->warn(" -- [SUPER] in [ReplanOnce]: Replan overtime, check parameters, replan dt = {}; exp_front = {}, exp_opt = {}, back_front = {}, back_opt = {}, viz = {}.",
+                           replan_dt, time_consuming_[EPX_TRAJ_FRONTEND], time_consuming_[EXP_TRAJ_OPT],
+                           time_consuming_[BACK_TRAJ_FRONTEND], time_consuming_[BACK_TRAJ_OPT],
+                           time_consuming_[VISUALIZATION]);
             return FAILED;
         }
 
@@ -418,6 +426,7 @@ namespace super_planner {
 
 
     RET_CODE SuperPlanner::generateExpTraj(ExpTraj &last_exp_traj_info, ExpTraj &out_exp_traj_info) {
+        stage3_profile::Scope profile_scope("generateExpTraj");
         /* 1) Log the exp traj frontend time*/
         TimeConsuming t_exp_frontend("t_exp_frontend", false);
 
@@ -869,6 +878,7 @@ namespace super_planner {
     }
 
     RET_CODE SuperPlanner::generateBackupTrajectory(ExpTraj &ref_exp_traj, BackupTraj &back_traj_info) {
+        stage3_profile::Scope profile_scope("generateBackupTrajectory");
         drone_state_mutex_.lock();
         back_traj_info.setRobotPos(robot_state_.p);
         drone_state_mutex_.unlock();

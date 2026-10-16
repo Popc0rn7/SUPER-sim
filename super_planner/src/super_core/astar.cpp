@@ -1,3 +1,4 @@
+#include "utils/header/stage3_profile.hpp"
 #include <super_core/stage3_height.h>
 /**
 * This file is part of SUPER
@@ -235,6 +236,7 @@ namespace path_search {
     RET_CODE Astar::pointToPointPathSearch(const rog_map::Vec3f &start_pt, const rog_map::Vec3f &end_pt,
                                            const int &flag, const double &searching_horizon,
                                            rog_map::vec_Vec3f &out_path, const double &time_out) {
+        stage3_profile::Scope profile_scope("Astar");
         RET_CODE setup_ret = setup(start_pt, end_pt, flag, searching_horizon);
         if (setup_ret != SUCCESS) {
             return setup_ret;
@@ -514,7 +516,8 @@ namespace path_search {
             double time_2 = ros_ptr_->getSimTime();
             if (!cfg_.visual_process && (time_2 - time_1) > time_out) {
                 fmt::print(fg(fmt::color::indian_red),
-                           "Failed in A star path searching !!! {} seconds time limit exceeded.\n", time_out);
+                           "Failed in A star path searching !!! {} seconds time limit exceeded; elapsed={} s, iterations={}.\n",
+                           time_out, time_2-time_1, num_iter);
                 return TIME_OUT;
             }
         }
