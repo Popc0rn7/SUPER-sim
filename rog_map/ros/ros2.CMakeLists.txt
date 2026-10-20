@@ -33,6 +33,12 @@ find_package(visualization_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(yaml-cpp REQUIRED)
+if(TARGET yaml-cpp::yaml-cpp)
+    set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_TARGET yaml-cpp)
+endif()
 
 set(includes
         include
@@ -44,7 +50,7 @@ set(includes
 set(third_party_libs
         #            ${OpenCV_LIBRARIES}
         ${PCL_LIBRARIES}
-        yaml-cpp
+        ${YAML_CPP_TARGET}
 )
 
 set(ros_libs

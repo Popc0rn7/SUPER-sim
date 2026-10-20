@@ -24,8 +24,6 @@ add_definitions(-DUSE_ROS2)
 string(TOUPPER $ENV{ROS_DISTRO} ROS_VERSION)
 message(STATUS "ROS version: ${ROS_VERSION}")
 
-# for CLION to search the package, user should change to his/her own relative location
-set(CMAKE_PREFIX_PATH ../../../install)
 include_directories(BEFORE
         include
         ../../../devel/include
@@ -46,6 +44,12 @@ find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(yaml-cpp REQUIRED)
+if(TARGET yaml-cpp::yaml-cpp)
+    set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+else()
+    set(YAML_CPP_TARGET yaml-cpp)
+endif()
 
 
 set(includes
@@ -58,7 +62,7 @@ set(includes
 set(third_party_libs
         #            ${OpenCV_LIBRARIES}
         ${PCL_LIBRARIES}
-        yaml-cpp
+        ${YAML_CPP_TARGET}
 )
 
 if(SUPER_ENABLE_STACKTRACE)
