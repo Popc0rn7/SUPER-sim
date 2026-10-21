@@ -236,7 +236,7 @@ namespace path_search {
     RET_CODE Astar::pointToPointPathSearch(const rog_map::Vec3f &start_pt, const rog_map::Vec3f &end_pt,
                                            const int &flag, const double &searching_horizon,
                                            rog_map::vec_Vec3f &out_path, const double &time_out) {
-        stage3_profile::Scope profile_scope("Astar");
+        stage3_profile::Scope profile_scope("Astar", [this] { return ros_ptr_->getSimTime(); });
         RET_CODE setup_ret = setup(start_pt, end_pt, flag, searching_horizon);
         if (setup_ret != SUCCESS) {
             return setup_ret;
@@ -273,7 +273,7 @@ namespace path_search {
                     cout << rog_map::RED <<
                          " -- [A*] " << RET_CODE_STR[INIT_ERROR]
                          << " : start point deeply occupied, cannot find feasible path.\n" << rog_map::RESET << endl;
-                    return INIT_ERROR;
+                    profile_scope.outcome("INIT_ERROR"); return INIT_ERROR;
                 }
             }
         }
@@ -296,7 +296,7 @@ namespace path_search {
                                                  0.5,
                                                  1);
                     }
-                    return INIT_ERROR;
+                    profile_scope.outcome("INIT_ERROR"); return INIT_ERROR;
                 }
                 goal_clipped = true;
             }
@@ -328,7 +328,7 @@ namespace path_search {
                 ros_ptr_->vizAstarPoints(local_start_pt, Color::Orange(), "local_start_pt", 0.3, 1);
                 ros_ptr_->vizAstarPoints(local_end_pt, Color::Green(), "local_end_pt", 0.3, 1);
             }
-            return INIT_ERROR;
+            profile_scope.outcome("INIT_ERROR"); return INIT_ERROR;
         }
 
 
@@ -368,6 +368,7 @@ namespace path_search {
 
         while (!open_set.empty()) {
             num_iter++;
+            profile_scope.work(num_iter);
             current = open_set.top();
             open_set.pop();
             if (cfg_.visual_process) {
@@ -394,6 +395,7 @@ namespace path_search {
                 ConvertNodePathToPointPath(node_path, out_path);
                 // A clipped endpoint is local progress, not the requested goal.
                 // REACH_GOAL makes PathSearch append the original goal directly.
+                profile_scope.outcome(goal_clipped ? "REACH_HORIZON" : "REACH_GOAL");
                 return goal_clipped ? REACH_HORIZON : REACH_GOAL;
             }
 
@@ -411,7 +413,7 @@ namespace path_search {
                     node_path.push_back(startPtr);
                 }
                 ConvertNodePathToPointPath(node_path, out_path);
-                return REACH_HORIZON;
+                profile_scope.outcome("REACH_HORIZON"); return REACH_HORIZON;
             }
 
 
@@ -518,7 +520,7 @@ namespace path_search {
                 fmt::print(fg(fmt::color::indian_red),
                            "Failed in A star path searching !!! {} seconds time limit exceeded; elapsed={} s, iterations={}.\n",
                            time_out, time_2-time_1, num_iter);
-                return TIME_OUT;
+                profile_scope.outcome("TIME_OUT"); return TIME_OUT;
             }
         }
         double time_2 = ros_ptr_->getSimTime();
@@ -526,7 +528,7 @@ namespace path_search {
             fmt::print(fg(fmt::color::indian_red), "Time consume in A star path finding is {} s, iter={}.\n",
                        (time_2 - time_1),
                        num_iter);
-            return NO_PATH;
+            profile_scope.outcome("NO_PATH"); return NO_PATH;
         }
 
         if (md_.unknown_as_occ && !frontier_queue.empty()) {
@@ -543,7 +545,7 @@ namespace path_search {
             }
             if (frontier_queue.empty()) {
                 cout << rog_map::RED << " -- [A*] Frontier queue is empty, return." << rog_map::RESET << endl;
-                return NO_PATH;
+                profile_scope.outcome("NO_PATH"); return NO_PATH;
             }
             retrievePath(local_goal, node_path);
             if (start_pt_out_local_map) {
@@ -551,10 +553,10 @@ namespace path_search {
             }
             ConvertNodePathToPointPath(node_path, out_path);
             cout << rog_map::BLUE << "Frontier queue: " << frontier_queue.size() << endl;
-            return REACH_HORIZON;
+            profile_scope.outcome("REACH_HORIZON"); return REACH_HORIZON;
         }
         ros_ptr_->error(" -- [A*] Point to point path cannot find path with iter num: {}, return.", num_iter);
-        return NO_PATH;
+        profile_scope.outcome("NO_PATH"); return NO_PATH;
     }
 
     RET_CODE Astar::escapePathSearch(const rog_map::Vec3f &start_pt, const int flag, rog_map::vec_Vec3f &out_path) {

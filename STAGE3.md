@@ -27,3 +27,16 @@ A* 远目标裁剪：成功裁剪到局部窗口内的目标仅表示局部进�
 历史飞行产物；覆盖近目标、裁剪目标、距离截止及连续调用，不替代障碍场景飞行验收。
 独立运行也可用 `python3 src/super_planner/test/run_astar_clipped_goal.py
 build/super_planner/astar_clipped_goal_test`（同一行命令）。
+
+## 规划预算与可选性能记录
+
+`super_planner/astar_time_limit` 控制两处点到点 A* 的仿真时间预算，默认 0.1 秒；
+仅接受有限的 `(0, 0.3]` 值，非法输入在加载时拒绝。它与 `replan_forward_dt`
+及外层接受预算分别生效，增加搜索预算不保证轨迹能按时提交。
+原有双时钟预算拒绝和备用轨迹机制保持不变。
+
+设置 `SUPER_PROFILE_PATH` 才启用 JSONL 性能记录。规划与搜索 scope 包含调用 ID、
+父 ID、仿真时间及墙钟/线程 CPU 时间；A* 记录循环次数和结果。
+只有写入执行轨迹时才记录 committed 及提交时刻，生成成功不等于提交。
+未打标的返回分支保留 unreported；未提供仿真时钟的 scope 需用同机时钟锚点映射。
+地图版本和优化迭代次数目前未记录。飞行时序选择、两端分析和验收入口由课程仓库维护。

@@ -103,7 +103,8 @@ namespace super_planner {
     SuperPlanner::PlanFromRest(const Vec3f &goal_p,
                                const double &goal_yaw,
                                const bool &new_goal) {
-        stage3_profile::Scope profile_scope("PlanFromRest");
+        stage3_profile::Scope profile_scope("PlanFromRest", [this] { return ros_ptr_->getSimTime(); });
+        profile_scope.outcome("not_committed");
         std::lock_guard<std::mutex> guard(replan_lock_);
         latest_replan.reset();
         latest_replan.setGoal(goal_p, goal_yaw, robot_state_);
@@ -159,6 +160,7 @@ namespace super_planner {
             }
 
             cmd_traj_info_.setTrajectory(exp_traj_info, back_traj_info);
+            profile_scope.committed();
             last_exp_traj_info_ = exp_traj_info;
             robot_on_backup_traj_ = false;
             gi_.new_goal = false;
@@ -178,6 +180,7 @@ namespace super_planner {
             }
             robot_on_backup_traj_ = false;
             cmd_traj_info_.setTrajectory(exp_traj_info);
+            profile_scope.committed();
             last_exp_traj_info_ = exp_traj_info;
             gi_.new_goal = false;
 
@@ -200,7 +203,8 @@ namespace super_planner {
     SuperPlanner::ReplanOnce(const Vec3f &goal_p,
                              const double &goal_yaw,
                              const bool &new_goal) {
-        stage3_profile::Scope profile_scope("ReplanOnce");
+        stage3_profile::Scope profile_scope("ReplanOnce", [this] { return ros_ptr_->getSimTime(); });
+        profile_scope.outcome("not_committed");
         const double replan_sim_start = ros_ptr_->getSimTime();
         TimeConsuming replan_total_t("ReplanOnce", false);
         std::lock_guard<std::mutex> guard(replan_lock_);
@@ -276,6 +280,9 @@ namespace super_planner {
                replan_sim_dt > cfg_.replan_forward_dt * 0.9)
             : replan_dt > cfg_.replan_forward_dt * 0.9;
         if (over_budget) {
+            profile_scope.outcome(replan_sim_dt < 0 ? "clock_reversed" :
+                (cfg_.replan_wall_limit > 0 && replan_sim_dt > cfg_.replan_forward_dt * 0.9
+                 ? "sim_budget_rejected" : "wall_budget_rejected"));
             ros_ptr_->warn(" -- [SUPER] timing gate: wall={} s, sim={} s, optional wall cap={} s, forward={} s.",
                            replan_dt, replan_sim_dt, cfg_.replan_wall_limit, cfg_.replan_forward_dt);
             ros_ptr_->warn(" -- [SUPER] in [ReplanOnce]: Replan overtime, check parameters, replan dt = {}; exp_front = {}, exp_opt = {}, back_front = {}, back_opt = {}, viz = {}.",
@@ -287,6 +294,7 @@ namespace super_planner {
 
         if (back_ret_code == SUCCESS) {
             cmd_traj_info_.setTrajectory(exp_traj_info, back_traj_info);
+            profile_scope.committed();
             last_exp_traj_info_ = exp_traj_info;
             robot_on_backup_traj_ = false;
             gi_.new_goal = false;
@@ -323,6 +331,7 @@ namespace super_planner {
         } else if (back_ret_code == FINISH) {
             // Which means the exp traj is all in known free, no need for backup traj
             cmd_traj_info_.setTrajectory(exp_traj_info);
+            profile_scope.committed();
             last_exp_traj_info_ = exp_traj_info;
             robot_on_backup_traj_ = false;
             gi_.new_goal = false;
@@ -426,7 +435,7 @@ namespace super_planner {
 
 
     RET_CODE SuperPlanner::generateExpTraj(ExpTraj &last_exp_traj_info, ExpTraj &out_exp_traj_info) {
-        stage3_profile::Scope profile_scope("generateExpTraj");
+        stage3_profile::Scope profile_scope("generateExpTraj", [this] { return ros_ptr_->getSimTime(); });
         /* 1) Log the exp traj frontend time*/
         TimeConsuming t_exp_frontend("t_exp_frontend", false);
 
@@ -481,6 +490,7 @@ namespace super_planner {
                     if (cfg_.print_log)
                         ros_ptr_->warn(
                                 " -- [SUPER] Replan, emergency stop, return FAILED and wait for plan form rest.");
+                    profile_scope.outcome("FAILED");
                     return FAILED;
                 }
 
@@ -488,6 +498,7 @@ namespace super_planner {
                     ros_ptr_->warn(
                             " -- [generateExpTraj] replan_state_TT >= cmd_traj_info_.pos_traj.getTotalDuration(), return NONEED and wait for plan form rest.");
                 }
+                profile_scope.outcome("NO_NEED");
                 return NO_NEED;
             }
 
@@ -501,8 +512,10 @@ namespace super_planner {
                         if (cfg_.print_log)
                             ros_ptr_->warn(
                                     " -- [SUPER] Replan, emergency stop, return FAILED and wait for plan form rest.");
+                        profile_scope.outcome("FAILED");
                         return FAILED;
                     } else {
+                        profile_scope.outcome("NO_NEED");
                         return NO_NEED;
                     }
                 }
@@ -519,8 +532,10 @@ namespace super_planner {
                         if (cfg_.print_log)
                             ros_ptr_->warn(
                                     " -- [SUPER] Replan, emergency stop, return FAILED and wait for plan form rest.");
+                        profile_scope.outcome("FAILED");
                         return FAILED;
                     } else {
+                        profile_scope.outcome("NO_NEED");
                         return NO_NEED;
                     }
                 }
@@ -535,8 +550,10 @@ namespace super_planner {
                     if (robot_on_backup_traj_) {
                         ros_ptr_->warn(
                                 " -- [SUPER] Replan, emergency stop, return FAILED and wait for plan form rest.");
+                        profile_scope.outcome("FAILED");
                         return FAILED;
                     } else {
+                        profile_scope.outcome("NO_NEED");
                         return NO_NEED;
                     }
                 }
@@ -593,6 +610,7 @@ namespace super_planner {
             // * 7）Begin replan process, first get the replan state from the committed trajectory.
             if (!guide_pos_traj.getState(replan_state_TT, pos_init_state)) {
                 ros_ptr_->warn(" -- [SUPER] Invalid traj or eval t");
+                profile_scope.outcome("FAILED");
                 return FAILED;
             }
             // * Generate guide path with time stampe, for hot trajectory initialization
@@ -690,10 +708,12 @@ namespace super_planner {
 //                }
                 if (!PathSearch(guide_path.back(), gi_.goal_p, temp_horizon, new_path)) {
                     ros_ptr_->warn(" -- [SUPER] PathSearch for new path failed");
+                    profile_scope.outcome("FAILED");
                     return FAILED;
                 }
                 if (new_path.size() < 2) {
                     ros_ptr_->warn(" -- [SUPER] PathSearch for new path failed");
+                    profile_scope.outcome("FAILED");
                     return FAILED;
                 }
 
@@ -763,6 +783,7 @@ namespace super_planner {
 
         if (!bool_ret_code) {
             ros_ptr_->warn(" -- [SUPER] SearchPolytopeOnPath for new path failed");
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
         {
@@ -804,11 +825,13 @@ namespace super_planner {
         }
         if (!temp_ret) {
             ros_ptr_->warn(" -- [SUPER] OptimizationExpTrajInPolytopes for new path failed");
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
         double replan_total_t = (ros_ptr_->getSimTime() - replan_process_start_WT);
         if (replan_total_t > cfg_.replan_forward_dt) {
             ros_ptr_->warn(" -- [SUPER] Replan over time({})!!!! Return FAILED", replan_total_t);
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
 
@@ -826,6 +849,7 @@ namespace super_planner {
             !guide_pos_traj.getPartialTrajectoryByTime(replan_process_start_TT, replan_state_TT,
                                                        temp_exp_traj)) {
             ros_ptr_->error(" -- [SUPER] in [generateExpTraj]: getPartialTrajectoryByTime failed, force return");
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
         out_exp_traj_info.setSFC(sfc);
@@ -836,6 +860,7 @@ namespace super_planner {
             StatePVAJ yaw_replan_state;
             if (!guide_yaw_traj.getState(replan_state_TT, yaw_replan_state)) {
                 ros_ptr_->warn(" -- [SUPER] Invalid traj or eval t");
+                profile_scope.outcome("FAILED");
                 return FAILED;
             }
             init_yaw = yaw_replan_state.row(0);
@@ -851,12 +876,14 @@ namespace super_planner {
 
         if (!yaw_traj_opt_->optimize(init_yaw, fina_yaw, out_traj, new_traj, 3, false, free_end)) {
             ros_ptr_->error(" -- [SUPER] in [generateExpTraj]: YawTrajOpt failed, force return");
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
         if (!last_exp_traj_info.empty()) {
             if (!guide_yaw_traj.getPartialTrajectoryByTime(replan_process_start_TT, replan_state_TT,
                                                            old_traj)) {
                 ros_ptr_->error(" -- [SUPER] in [generateExpTraj]: getPartialTrajectoryByTime failed, force return");
+                profile_scope.outcome("FAILED");
                 return FAILED;
             }
         }
@@ -874,11 +901,13 @@ namespace super_planner {
         latest_replan.setExpYawTraj(temp_yaw_traj);
         latest_replan.setExpTraj(temp_exp_traj);
 
+        profile_scope.outcome("SUCCESS");
+
         return SUCCESS;
     }
 
     RET_CODE SuperPlanner::generateBackupTrajectory(ExpTraj &ref_exp_traj, BackupTraj &back_traj_info) {
-        stage3_profile::Scope profile_scope("generateBackupTrajectory");
+        stage3_profile::Scope profile_scope("generateBackupTrajectory", [this] { return ros_ptr_->getSimTime(); });
         drone_state_mutex_.lock();
         back_traj_info.setRobotPos(robot_state_.p);
         drone_state_mutex_.unlock();
@@ -891,6 +920,7 @@ namespace super_planner {
             if (cfg_.print_log) {
                 ros_ptr_->info(" -- [SUPER] in [generateBackupTrajectory]: start_t > total_dur, return NO_NEED");
             }
+            profile_scope.outcome("NO_NEED");
             return NO_NEED;
         }
 
@@ -943,6 +973,7 @@ namespace super_planner {
                     }
                 }
             }
+            profile_scope.outcome("FINISH");
             return FINISH;
         }
         Vec3f invisible_p = eval_ps.back().second;
@@ -974,6 +1005,7 @@ namespace super_planner {
             ros_ptr_->error(
                     " -- [SUPER] in [PlanFromRest] Local start point is deeply occupied, which should not happened.");
             latest_replan.setRetCode(SUPER_RET_CODE::SUPER_NO_START_POINT);
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
 
@@ -981,6 +1013,7 @@ namespace super_planner {
         Polytope temp_poly;
         if (!cg_ptr_->GeneratePolytopeFromLine(line, temp_poly)) {
             ros_ptr_->warn(" -- [SUPER] GeneratePolytopeFromLine failed, force return");
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
         Eigen::Vector3d inner;
@@ -988,6 +1021,7 @@ namespace super_planner {
         if (!geometry_utils::findInterior(temp_poly.GetPlanes(), inner)) {
             ros_ptr_->warn(" -- [SUPER] Cannot generate feasible backup sfc, force return");
             vec_Vec3f seed{back_traj_info.getRobotPos(), seed_point};
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
 
@@ -995,6 +1029,7 @@ namespace super_planner {
             if (!fov_checker_->cutPolyByFov(robot_state_.p, robot_state_.q, seed_point,
                                             temp_poly)) {
                 ros_ptr_->warn(" -- [SUPER] cutPolyByFov failed, force return");
+                profile_scope.outcome("FAILED");
                 return FAILED;
             }
         }
@@ -1004,6 +1039,7 @@ namespace super_planner {
                                                    temp_poly)) {
             ros_ptr_->warn(" -- [SUPER] cutPolyBySensingHorizon failed, force return");
             vec_Vec3f seed{back_traj_info.getRobotPos(), seed_point};
+            profile_scope.outcome("FAILED");
             return FAILED;
         }
 
@@ -1131,9 +1167,11 @@ namespace super_planner {
             back_traj_info.setTrajectory(new_ts_WT, opt_ts, temp_pos_traj, temp_yaw_traj);
             latest_replan.setBackupTraj(temp_pos_traj);
             latest_replan.setBackupYawTraj(temp_yaw_traj);
+            profile_scope.outcome("SUCCESS");
             return SUCCESS;
         }
         ros_ptr_->warn(" -- [SUPER] Cannot find backup traj start point.");
+        profile_scope.outcome("FAILED");
         return FAILED;
     }
 
@@ -1208,7 +1246,7 @@ namespace super_planner {
         int flag = ON_INF_MAP | (cfg_.frontend_in_known_free ? UNKNOWN_AS_OCCUPIED : UNKNOWN_AS_FREE) | DONT_USE_INF_NEIGHBOR;
 
         RET_CODE ret_code = astar_ptr_->pointToPointPathSearch(temp_start_point, goal, flag, temp_plannning_horizon,
-                                                               path);
+                                                               path, cfg_.astar_time_limit);
 
         if(ret_code == INIT_ERROR){
             gi_.goal_valid = false;
@@ -1222,7 +1260,7 @@ namespace super_planner {
             fmt::print(fg(fmt::color::indian_red) | fmt::emphasis::bold,
                        " -- [Astar] Path search failed on inf map, try again on prob map.\n");
             ret_code = astar_ptr_->pointToPointPathSearch(temp_start_point, goal, flag, temp_plannning_horizon,
-                                                          path);
+                                                          path, cfg_.astar_time_limit);
             if (ret_code == SUCCESS || ret_code == REACH_HORIZON || ret_code == REACH_GOAL) {
                 fmt::print(fg(fmt::color::lime_green) | fmt::emphasis::bold,
                            " -- [Astar] Path search on prob map success.\n");

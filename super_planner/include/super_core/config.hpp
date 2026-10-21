@@ -28,6 +28,8 @@
 #include <rog_map/rog_map_core/config.hpp>
 #include <traj_opt/config.hpp>
 #include <utils/header/yaml_loader.hpp>
+#include <cmath>
+#include <stdexcept>
 
 namespace super_planner {
     using namespace traj_opt;
@@ -64,6 +66,7 @@ namespace super_planner {
         double corridor_bound_dis, corridor_line_max_length;
         double replan_forward_dt;
         double replan_wall_limit; // <=0 keeps the original wall-clock gate
+        double astar_time_limit;
         double sample_traj_dt;
         double robot_r;
         int iris_iter_num;
@@ -96,6 +99,10 @@ namespace super_planner {
             loader.LoadParam("super_planner/obs_skip_num", obs_skip_num, 1);
             loader.LoadParam("super_planner/replan_forward_dt", replan_forward_dt, 0.3);
             loader.LoadParam("super_planner/replan_wall_limit", replan_wall_limit, -1.0);
+            loader.LoadParam("super_planner/astar_time_limit", astar_time_limit, 0.1);
+            if (!std::isfinite(astar_time_limit) || astar_time_limit <= 0.0 || astar_time_limit > 0.3) {
+                throw std::invalid_argument("astar_time_limit must be in (0, 0.3] simulation seconds");
+            }
             loader.LoadParam("super_planner/corridor_bound_dis", corridor_bound_dis, 3.0);
             loader.LoadParam("super_planner/corridor_line_max_length", corridor_line_max_length, 3.0);
             loader.LoadParam("super_planner/planning_horizon", planning_horizon, 10.0);
