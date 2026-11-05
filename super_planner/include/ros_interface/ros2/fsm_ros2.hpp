@@ -45,6 +45,7 @@ namespace fsm {
     class FsmRos2 : public Fsm {
 
         rclcpp::Node::SharedPtr nh_;
+        std::string planning_frame_{"world"};
         rclcpp::Publisher<mars_quadrotor_msgs::msg::PositionCommand>::SharedPtr cmd_pub_;
         rclcpp::Publisher<mars_quadrotor_msgs::msg::PolynomialTrajectory>::SharedPtr mpc_cmd_pub_;
         rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
@@ -68,7 +69,7 @@ namespace fsm {
         }
 
         void publishCurPoseToPath() override {
-            path.header.frame_id = "world";
+            path.header.frame_id = planning_frame_;
             ros_ptr_->getSimTime(path.header.stamp.sec, path.header.stamp.nanosec);
             geometry_msgs::msg::PoseStamped pose;
             pose.header = path.header;
@@ -92,7 +93,7 @@ namespace fsm {
         void getOneHeartBeatMsg(mars_quadrotor_msgs::msg::PolynomialTrajectory &heartbeat, bool &traj_finish) {
             heartbeat.type = mars_quadrotor_msgs::msg::PolynomialTrajectory::HEART_BEAT;
             ros_ptr_->getSimTime(heartbeat.header.stamp.sec, heartbeat.header.stamp.nanosec);
-            heartbeat.header.frame_id = "world";
+            heartbeat.header.frame_id = planning_frame_;
             double swt;
             planner_ptr_->getOneHeartbeatTime(swt, traj_finish);
             heartbeat.start_wt_pos = swt;
@@ -100,7 +101,7 @@ namespace fsm {
 
         void getCommittedTrajectory(mars_quadrotor_msgs::msg::PolynomialTrajectory &cmd_traj) {
             ros_ptr_->getSimTime(cmd_traj.header.stamp.sec, cmd_traj.header.stamp.nanosec);
-            cmd_traj.header.frame_id = "world";
+            cmd_traj.header.frame_id = planning_frame_;
             cmd_traj.type = mars_quadrotor_msgs::msg::PolynomialTrajectory::POSITION_TRAJ |
                             mars_quadrotor_msgs::msg::PolynomialTrajectory::HEART_BEAT;
             planner_ptr_->lockCommittedTraj();
@@ -151,7 +152,7 @@ namespace fsm {
             planner_ptr_->getOneCommandFromTraj(pvaj, yaw, yaw_dot, on_backup_traj, traj_finish);
 //            ros_ptr_->getSimTime(pos_cmd.header.stamp.sec, pos_cmd.header.stamp.nanosec);
             ros_ptr_->getSimTime(pos_cmd.header.stamp.sec, pos_cmd.header.stamp.nanosec);
-            pos_cmd.header.frame_id = "world";
+            pos_cmd.header.frame_id = planning_frame_;
             pos_cmd.position.x = pvaj(0, 0);
             pos_cmd.position.y = pvaj(1, 0);
             pos_cmd.position.z = pvaj(2, 0);
@@ -290,6 +291,10 @@ namespace fsm {
         }
 
         void goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+            if (!msg->header.frame_id.empty() && msg->header.frame_id != planning_frame_) {
+                RCLCPP_WARN(nh_->get_logger(), "Goal frame must be %s", planning_frame_.c_str());
+                return;
+            }
             super_utils::Vec3f goal_p = Vec3f{msg->pose.position.x, msg->pose.position.y, msg->pose.position.z};
             super_utils::Quatf goal_q = super_utils::Quatf{msg->pose.orientation.w, msg->pose.orientation.x,
                                                            msg->pose.orientation.y, msg->pose.orientation.z};
@@ -307,8 +312,9 @@ namespace fsm {
             nh_ = nh;
             cfg_ = Config(cfg_path);
             map_ptr_ = std::make_shared<rog_map::ROGMapROS>(nh_, cfg_path);
+            planning_frame_ = map_ptr_->getMapConfig().frame_id;
             // 初始化Planner
-            ros_ptr_ = std::make_shared<ros_interface::Ros2Interface>(nh_);
+            ros_ptr_ = std::make_shared<ros_interface::Ros2Interface>(nh_, planning_frame_);
             planner_ptr_ = std::make_shared<SuperPlanner>(cfg_path, ros_ptr_, map_ptr_);
             cmd_pub_ = nh_->create_publisher<mars_quadrotor_msgs::msg::PositionCommand>(cfg_.cmd_topic, qos);
             mpc_cmd_pub_ = nh_->create_publisher<mars_quadrotor_msgs::msg::PolynomialTrajectory>(cfg_.mpc_cmd_topic,

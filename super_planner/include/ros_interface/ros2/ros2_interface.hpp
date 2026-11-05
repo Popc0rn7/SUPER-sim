@@ -34,8 +34,8 @@ namespace ros_interface {
     class Ros2Interface : public RosInterface {
     public:
 
-        explicit Ros2Interface(const rclcpp::Node::SharedPtr nh)
-                : nh_(nh) {
+        explicit Ros2Interface(const rclcpp::Node::SharedPtr nh, std::string frame = "world")
+                : nh_(nh), frame_(std::move(frame)) {
             const rclcpp::QoS qos(rclcpp::QoS(100)
                                           .best_effort()
                                           .keep_last(100)
@@ -123,7 +123,7 @@ namespace ros_interface {
             Ros1Adapter::deleteAllMarkerArray(exp_traj_pub_);
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addTrajectoryToMarkerArray(mkr_arr, traj, ns, Color::Green(), 0.08, true, true);
-            exp_traj_pub_->publish(mkr_arr);
+            publishMarkers(exp_traj_pub_, mkr_arr);
         }
 
         void vizBackupTraj(const Trajectory &traj) {
@@ -136,7 +136,7 @@ namespace ros_interface {
             Ros1Adapter::deleteAllMarkerArray(backup_traj_pub_);
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addTrajectoryToMarkerArray(mkr_arr, traj, "backup_traj", Color::Green(), 0.08, true, false);
-            backup_traj_pub_->publish(mkr_arr);
+            publishMarkers(backup_traj_pub_, mkr_arr);
         }
 
         void vizFrontendPath(const super_utils::vec_Vec3f &path) override {
@@ -146,7 +146,7 @@ namespace ros_interface {
             Ros1Adapter::deleteAllMarkerArray(guide_path_pub_);
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addPathToMarkerArray(mkr_arr, path, Color::Pink(), "guide_path", 0.1, 0.05);
-            guide_path_pub_->publish(mkr_arr);
+            publishMarkers(guide_path_pub_, mkr_arr);
         }
 
         void vizExpSfc(const PolytopeVec &sfcs) override {
@@ -171,7 +171,7 @@ namespace ros_interface {
                                                       Color::Orange(), 0.15,
                                                       resolution_ / 2);
             }
-            exp_sfcs_pub_->publish(mkr_arr);
+            publishMarkers(exp_sfcs_pub_, mkr_arr);
         }
 
         void vizBackupSfc(const Polytope &sfc) override {
@@ -188,7 +188,7 @@ namespace ros_interface {
                                                   Color::Green(),
                                                   0.15,
                                                   resolution_ / 2);
-            backup_sfc_pub_->publish(mkr_arr);
+            publishMarkers(backup_sfc_pub_, mkr_arr);
         }
 
         void vizGoalPath(const super_utils::vec_Vec3f &path) override {
@@ -204,7 +204,7 @@ namespace ros_interface {
 
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addPathToMarkerArray(mkr_arr, path, Color::Yellow(), "goal", 0.3, 0.15);
-            goal_pub_->publish(mkr_arr);
+            publishMarkers(goal_pub_, mkr_arr);
         }
 
         void vizCommittedTraj(const geometry_utils::Trajectory &committed_traj,
@@ -237,15 +237,15 @@ namespace ros_interface {
                                                         true, false);
                 Ros1Adapter::addTrajectoryToMarkerArray(mkr_arr, backup_traj, "committed_backup", Color::Green(), 0.1,
                                                         false, false);
-                committed_traj_pub_->publish(mkr_arr);
+                publishMarkers(committed_traj_pub_, mkr_arr);
             } else {
                 visualization_msgs::msg::MarkerArray mkr_arr;
                 Ros1Adapter::addTrajectoryToMarkerArray(mkr_arr, committed_traj, "committed_exp", Color::Green(), 0.1,
                                                         true, false);
-                committed_traj_pub_->publish(mkr_arr);
+                publishMarkers(committed_traj_pub_, mkr_arr);
             }
 
-            committed_traj_pub_->publish(mkr_arr);
+            publishMarkers(committed_traj_pub_, mkr_arr);
         }
 
         void vizYawTraj(const Trajectory &pos_traj, const Trajectory &yaw_traj) override {
@@ -260,7 +260,7 @@ namespace ros_interface {
             Ros1Adapter::deleteAllMarkerArray(yaw_traj_pub_);
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addYawTrajectoryToMarkerArray(mkr_arr, pos_traj, yaw_traj);
-            yaw_traj_pub_->publish(mkr_arr);
+            publishMarkers(yaw_traj_pub_, mkr_arr);
         }
 
 
@@ -277,7 +277,7 @@ namespace ros_interface {
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addBoundingBoxToMarkerArray(mkr_arr, bbox_min, bbox_max, "local_map",
                                                      Color::Chartreuse());
-            astar_mkr_pub_->publish(mkr_arr);
+            publishMarkers(astar_mkr_pub_, mkr_arr);
         }
 
         void vizAstarPoints(const super_utils::Vec3f &position, const Color &c,
@@ -293,7 +293,7 @@ namespace ros_interface {
 
             visualization_msgs::msg::MarkerArray mkr_arr;
             Ros1Adapter::addPointToMarkerArray(mkr_arr, position, c, ns, size);
-            astar_mkr_pub_->publish(mkr_arr);
+            publishMarkers(astar_mkr_pub_, mkr_arr);
         }
 
         /*=============================FOR replan log ========================================*/
@@ -341,7 +341,7 @@ namespace ros_interface {
                                                                  0.15,
                                                                  0.02);
 
-            replan_log_mkr_pub_->publish(mkr_arr);
+            publishMarkers(replan_log_mkr_pub_, mkr_arr);
 
             // for pc
             // covert vecVec3f to pclPc
@@ -355,7 +355,7 @@ namespace ros_interface {
             }
             sensor_msgs::msg::PointCloud2 pc2;
             pcl::toROSMsg(pc, pc2);
-            pc2.header.frame_id = "world";
+            pc2.header.frame_id = frame_;
             getSimTime(pc2.header.stamp.sec, pc2.header.stamp.nanosec);
             replan_log_pc_pub_->publish(pc2);
 
@@ -374,7 +374,7 @@ namespace ros_interface {
                                                              Color::Pink(), Color::Orange(), "seed_line",
                                                              robot_r * 2,
                                                              robot_r * 2);
-            ciri_mkr_pub_->publish(mkr_arr);
+            publishMarkers(ciri_mkr_pub_, mkr_arr);
         }
 
         void vizCiriEllipsoid(const geometry_utils::Ellipsoid &ellipsoid) override{
@@ -386,7 +386,7 @@ namespace ros_interface {
             }
             visualization_msgs::msg::MarkerArray mkr_arr;
             ros_interface::Ros1Adapter::addEllipsoidToMarkerArray(mkr_arr, ellipsoid, "ellipsoid", Color(Color::Orange(), 0.3));
-            ciri_mkr_pub_->publish(mkr_arr);
+            publishMarkers(ciri_mkr_pub_, mkr_arr);
         }
 
         void vizCiriInfeasiblePoint(const super_utils::Vec3f p) override{
@@ -398,7 +398,7 @@ namespace ros_interface {
             }
             visualization_msgs::msg::MarkerArray mkr_arr;
             ros_interface::Ros1Adapter::addPointToMarkerArray(mkr_arr, p, Color::Red(), "infeasible_pt", 0.1);
-            ciri_mkr_pub_->publish(mkr_arr);
+            publishMarkers(ciri_mkr_pub_, mkr_arr);
         }
 
         void vizCiriPolytope(const geometry_utils::Polytope &polytope, const std::string & ns) override{
@@ -414,7 +414,7 @@ namespace ros_interface {
                                                                  Color::Green(),
                                                                  0.15,
                                                                  0.02);
-            ciri_mkr_pub_->publish(mkr_arr);
+            publishMarkers(ciri_mkr_pub_, mkr_arr);
         }
 
         void vizCiriPointCloud(const vec_Vec3f & points) override {
@@ -428,11 +428,17 @@ namespace ros_interface {
 
             sensor_msgs::msg::PointCloud2 pc2;
             ros_interface::Ros1Adapter::addVecPointsToPointCloud2(points, pc2);
+            pc2.header.frame_id = frame_;
             ciri_pc_pub_->publish(pc2);
         }
 
     private:
+        void publishMarkers(const MarkerArrayPubPtr &pub, visualization_msgs::msg::MarkerArray &markers) {
+            for (auto &marker : markers.markers) marker.header.frame_id = frame_;
+            pub->publish(markers);
+        }
         rclcpp::Node::SharedPtr nh_;
+        std::string frame_;
         // viz markers
         MarkerArrayPubPtr goal_pub_, backup_sfc_pub_, backup_traj_pub_, committed_traj_pub_,
                 receding_traj_pub_, exp_sfcs_pub_, point_pub_, fov_pub_,

@@ -42,6 +42,11 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <algorithm>
+#include <chrono>
+#include <deque>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 #include <rog_map/rog_map.h>
@@ -54,6 +59,16 @@ namespace rog_map {
     class ROGMapROS : public ROGMap {
         rclcpp::Node::SharedPtr nh_;
         std::shared_ptr<tf2_ros::TransformBroadcaster> br_map_ego_;
+        std::unique_ptr<tf2_ros::Buffer> input_tf_;
+        std::unique_ptr<tf2_ros::TransformListener> input_tf_listener_;
+        struct PendingCloud {
+            sensor_msgs::msg::PointCloud2::SharedPtr message;
+            std::chrono::steady_clock::time_point received;
+        };
+        std::deque<PendingCloud> pending_clouds_;
+        int64_t last_cloud_stamp_{0};
+        int64_t last_input_time_{-1};
+        bool input_epoch_invalid_{false};
 
 
         const double getSystemWalltimeNow() override {
@@ -85,6 +100,16 @@ namespace rog_map {
         } rc_;
 
         void odomCallback(const nav_msgs::msg::Odometry::SharedPtr odom_msg) {
+            if (input_epoch_invalid_) return;
+            if (cfg_.cloud_pose_from_tf &&
+                (odom_msg->header.frame_id != cfg_.frame_id ||
+                 odom_msg->child_frame_id != cfg_.body_frame ||
+                 rclcpp::Time(odom_msg->header.stamp).nanoseconds() <= 0 ||
+                 (nh_->now() - rclcpp::Time(odom_msg->header.stamp)).seconds() > cfg_.odom_timeout)) {
+                RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
+                                    "Dropping navigation odometry with wrong frame or expired time");
+                return;
+            }
             updateRobotState(std::make_pair(Vec3f(odom_msg->pose.pose.position.x,
                                                   odom_msg->pose.pose.position.y,
                                                   odom_msg->pose.pose.position.z),
@@ -94,9 +119,11 @@ namespace rog_map {
                                                   odom_msg->pose.pose.orientation.z)));
 
 
+            // AS2 owns its TF tree. The legacy standalone demo keeps its visualization TF.
+            if (cfg_.cloud_pose_from_tf) return;
             geometry_msgs::msg::TransformStamped transformStamped;
             transformStamped.header.stamp = nh_->get_clock()->now();
-            transformStamped.header.frame_id = "world";
+            transformStamped.header.frame_id = cfg_.frame_id;
             transformStamped.child_frame_id = "drone";
             transformStamped.transform.translation.x = odom_msg->pose.pose.position.x;
             transformStamped.transform.translation.y = odom_msg->pose.pose.position.y;
@@ -109,6 +136,18 @@ namespace rog_map {
         }
 
         void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
+            if (input_epoch_invalid_) return;
+            if (cfg_.cloud_pose_from_tf) {
+                if (cloud_msg->header.frame_id != cfg_.frame_id ||
+                    rclcpp::Time(cloud_msg->header.stamp).nanoseconds() <= 0) {
+                    RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
+                                        "Registered cloud has wrong frame or missing time");
+                    return;
+                }
+                if (pending_clouds_.size() >= 8) pending_clouds_.pop_front();
+                pending_clouds_.push_back({cloud_msg, std::chrono::steady_clock::now()});
+                return;
+            }
             if (!robot_state_.rcv) {
                 std::cout << YELLOW << " -- [ROS] No odom received, skip cloud callback." << RESET << std::endl;
                 return;
@@ -118,8 +157,7 @@ namespace rog_map {
                 std::cout << YELLOW << " -- [ROS] Odom timeout, skip cloud callback." << RESET << std::endl;
                 return;
             }
-            PointCloud temp_pc;
-            pcl::fromROSMsg(*cloud_msg, temp_pc);
+            PointCloud temp_pc = readCloud(*cloud_msg);
             rc_.updete_lock.lock();
             rc_.pc = temp_pc;
             rc_.pc_pose = std::make_pair(robot_state_.p, robot_state_.q);
@@ -128,7 +166,73 @@ namespace rog_map {
             rc_.updete_lock.unlock();
         }
 
+        PointCloud readCloud(const sensor_msgs::msg::PointCloud2 &msg) {
+            PointCloud cloud;
+            const bool has_intensity = std::any_of(msg.fields.begin(), msg.fields.end(),
+                [](const auto &field) {return field.name == "intensity";});
+            if (has_intensity) {
+                pcl::fromROSMsg(msg, cloud);
+            } else {
+                // XYZ sensors carry no intensity; do not depend on PCL's missing-field values.
+                pcl::PointCloud<pcl::PointXYZ> xyz;
+                pcl::fromROSMsg(msg, xyz);
+                cloud.resize(xyz.size());
+                for (size_t i = 0; i < xyz.size(); ++i) {
+                    cloud[i].x = xyz[i].x; cloud[i].y = xyz[i].y; cloud[i].z = xyz[i].z;
+                    cloud[i].intensity = 0.0f;
+                }
+            }
+            return cloud;
+        }
+
+        void processRegisteredClouds() {
+            const auto now = nh_->now();
+            if (last_input_time_ >= 0 && now.nanoseconds() < last_input_time_) {
+                pending_clouds_.clear();
+                last_cloud_stamp_ = 0;
+                input_epoch_invalid_ = true;
+                robot_state_.rcv = false;
+                RCLCPP_ERROR(nh_->get_logger(),
+                    "ROS time moved backwards; restart SUPER to discard the old map");
+            }
+            last_input_time_ = now.nanoseconds();
+            if (input_epoch_invalid_) return;
+            for (auto it = pending_clouds_.begin(); it != pending_clouds_.end();) {
+                const auto &msg = *it->message;
+                const rclcpp::Time stamp(msg.header.stamp);
+                const auto waited = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - it->received).count();
+                if (stamp.nanoseconds() <= last_cloud_stamp_ || waited > cfg_.transform_wait ||
+                    (now - stamp).seconds() > cfg_.odom_timeout) {
+                    RCLCPP_WARN_THROTTLE(nh_->get_logger(), *nh_->get_clock(), 2000,
+                                        "Dropping expired/out-of-order registered cloud");
+                    it = pending_clouds_.erase(it);
+                    continue;
+                }
+                if (stamp > now) {++it; continue;}
+                try {
+                    const auto tf = input_tf_->lookupTransform(cfg_.frame_id, cfg_.body_frame, stamp);
+                    const auto &p = tf.transform.translation;
+                    const auto &q = tf.transform.rotation;
+                    auto cloud = readCloud(msg);
+                    {
+                        std::lock_guard<mutex> lock(rc_.updete_lock);
+                        rc_.pc = std::move(cloud);
+                        rc_.pc_pose = std::make_pair(Vec3f(p.x, p.y, p.z), Quatf(q.w, q.x, q.y, q.z));
+                        rc_.unfinished_frame_cnt++;
+                        map_empty_ = false;
+                    }
+                    last_cloud_stamp_ = stamp.nanoseconds();
+                    it = pending_clouds_.erase(it);
+                } catch (const tf2::TransformException &) {
+                    ++it;
+                }
+            }
+        }
+
         void updateCallback() {
+            if (cfg_.cloud_pose_from_tf) processRegisteredClouds();
+            if (input_epoch_invalid_) return;
             if (map_empty_) {
                 static double last_print_t = nh_->get_clock()->now().seconds();
                 double cur_t = nh_->get_clock()->now().seconds();
@@ -225,7 +329,7 @@ namespace rog_map {
                     PointCloud pc;
                     esdf_map_->getPositiveESDFPointCloud(box_min, box_max, robot_state_.p.z() - 0.5, pc);
                     pcl::toROSMsg(pc, cloud_msg);
-                    cloud_msg.header.frame_id = "world";
+                    cloud_msg.header.frame_id = cfg_.frame_id;
                     cloud_msg.header.stamp = nh_->get_clock()->now();
                     vm_.esdf_pub->publish(cloud_msg);
                 }
@@ -234,7 +338,7 @@ namespace rog_map {
                 //     PointCloud pc;
                 //     esdf_map_->getNegativeESDFPointCloud(box_min, box_max, robot_state_.p.z() - 0.5, pc);
                 //     pcl::toROSMsg(pc, cloud_msg);
-                //     cloud_msg.header.frame_id = "world";
+                //     cloud_msg.header.frame_id = cfg_.frame_id;
                 //     cloud_msg.header.stamp = nh_->get_clock()->now();
                 //     vm_.esdf_neg_pub->publish(cloud_msg);
                 // }
@@ -305,7 +409,7 @@ namespace rog_map {
             }
             pcl::toROSMsg(pcl_cloud, cloud);
             cloud.header.stamp = nh_->get_clock()->now();
-            cloud.header.frame_id = "world";
+            cloud.header.frame_id = cfg_.frame_id;
         }
 
     public:
@@ -319,6 +423,12 @@ namespace rog_map {
                                   .durability_volatile());
 
             cfg_ = rog_map::Config(cfg_path);
+            if (cfg_.cloud_pose_from_tf) {
+                if (cfg_.transform_wait <= 0 || cfg_.body_frame.empty() || cfg_.frame_id.empty())
+                    throw std::invalid_argument("Invalid AS2 input frame or transform_wait");
+                input_tf_ = std::make_unique<tf2_ros::Buffer>(nh_->get_clock());
+                input_tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*input_tf_);
+            }
             // 创建 TransformBroadcaster
             br_map_ego_ = std::make_shared<tf2_ros::TransformBroadcaster>(nh_);
 
@@ -360,20 +470,20 @@ namespace rog_map {
                 so.callback_group = rc_.odom_me_cbk_group;
                 rc_.odom_sub = nh_->create_subscription<nav_msgs::msg::Odometry>(
                     cfg_.odom_topic, qos, std::bind(&ROGMapROS::odomCallback, this, std::placeholders::_1), so);
-                so.callback_group = rc_.cloud_me_cbk_group;
+                so.callback_group = rc_.odom_me_cbk_group;
                 rc_.cloud_sub = nh_->create_subscription<sensor_msgs::msg::PointCloud2>(
                     cfg_.cloud_topic, qos, std::bind(&ROGMapROS::cloudCallback, this, std::placeholders::_1), so);
                 rc_.update_cbk_group = nh_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
                 rc_.update_timer = nh_->create_wall_timer(
                     std::chrono::milliseconds(1), // 0.001秒，即1毫秒
                     std::bind(&ROGMapROS::updateCallback, this),
-                    rc_.update_cbk_group
+                    rc_.odom_me_cbk_group
                 );
             }
         }
 
     private:
-        static void visualizeBoundingBox(visualization_msgs::msg::MarkerArray& mkrarr,
+        void visualizeBoundingBox(visualization_msgs::msg::MarkerArray& mkrarr,
                                          const double& stamp,
                                          const Vec3f& box_min,
                                          const Vec3f& box_max,
@@ -392,7 +502,7 @@ namespace rog_map {
             int id = 0;
             visualization_msgs::msg::Marker line_strip;
             line_strip.header.stamp = rclcpp::Time(stamp);
-            line_strip.header.frame_id = "world";
+            line_strip.header.frame_id = cfg_.frame_id;
             line_strip.action = visualization_msgs::msg::Marker::ADD;
             line_strip.ns = ns;
             line_strip.pose.orientation.w = 1.0;
@@ -447,7 +557,7 @@ namespace rog_map {
             mkrarr.markers.push_back(line_strip);
         }
 
-        static void visualizeText(visualization_msgs::msg::MarkerArray& mkr_arr,
+        void visualizeText(visualization_msgs::msg::MarkerArray& mkr_arr,
                                   const double& stamp,
                                   const std::string& ns,
                                   const std::string& text,
@@ -456,7 +566,7 @@ namespace rog_map {
                                   const double& size = 0.6,
                                   const int& id = -1) {
             visualization_msgs::msg::Marker marker;
-            marker.header.frame_id = "world";
+            marker.header.frame_id = cfg_.frame_id;
             marker.header.stamp = rclcpp::Time(stamp);
             marker.action = visualization_msgs::msg::Marker::ADD;
             marker.pose.orientation.w = 1.0;
@@ -479,7 +589,7 @@ namespace rog_map {
             mkr_arr.markers.push_back(marker);
         };
 
-        static void visualizePoint(visualization_msgs::msg::MarkerArray& mkr_arr,
+        void visualizePoint(visualization_msgs::msg::MarkerArray& mkr_arr,
                                    const double& stamp,
                                    const Vec3f& pt,
                                    Color color = Color::Pink(),
@@ -492,7 +602,7 @@ namespace rog_map {
             if (isnan(pt.x()) || isnan(pt.y()) || isnan(pt.z())) {
                 return;
             }
-            marker_ball.header.frame_id = "world";
+            marker_ball.header.frame_id = cfg_.frame_id;
             marker_ball.header.stamp = rclcpp::Time(stamp);
             marker_ball.ns = ns.c_str();
             marker_ball.id = id >= 0 ? id : cnt++;
@@ -515,7 +625,7 @@ namespace rog_map {
             // add test
             if (print_ns) {
                 visualization_msgs::msg::Marker marker;
-                marker.header.frame_id = "world";
+                marker.header.frame_id = cfg_.frame_id;
                 marker.header.stamp = rclcpp::Time(stamp);
                 marker.action = visualization_msgs::msg::Marker::ADD;
                 marker.pose.orientation.w = 1.0;

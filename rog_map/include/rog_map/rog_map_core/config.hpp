@@ -117,6 +117,9 @@ namespace rog_map {
             loader.LoadParam(name_space + "/ros_callback/cloud_topic", cloud_topic, string("/cloud_registered"));
             loader.LoadParam(name_space + "/ros_callback/odom_topic", odom_topic, string("/lidar_slam/odom"));
             loader.LoadParam(name_space + "/ros_callback/odom_timeout", odom_timeout, 0.05);
+            loader.LoadParam(name_space + "/ros_callback/cloud_pose_from_tf", cloud_pose_from_tf, false);
+            loader.LoadParam(name_space + "/ros_callback/body_frame", body_frame, string("drone"));
+            loader.LoadParam(name_space + "/ros_callback/transform_wait", transform_wait, 0.25);
 
 
             loader.LoadParam(name_space + "/visualization/enable", visualization_en, false);
@@ -339,6 +342,9 @@ namespace rog_map {
 
 
         double odom_timeout{};
+        bool cloud_pose_from_tf{false};
+        string body_frame{"drone"};
+        double transform_wait{0.25};
         Vec3f visualization_range{};
         double viz_time_rate{};
         int viz_frame_rate{};
